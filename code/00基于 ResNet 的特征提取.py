@@ -10,12 +10,14 @@ class ResNetFeatureExtractor(nn.Module):
         self.feature_extractor = nn.Sequential(*list(self.resnet.children())[:-1])
         # 添加全局平均池化层，确保输出特征维度一致
         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
-
+        self.fc = nn.Linear(2048, 256)
     def forward(self, x):
         x = self.feature_extractor(x)
         x = self.avgpool(x)
         # 将特征展平
         x = x.view(x.size(0), -1)
+
+        x = self.fc(x)
         return x
 
 # 测试
