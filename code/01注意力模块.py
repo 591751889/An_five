@@ -128,13 +128,121 @@ class AttentionFusion(nn.Module):
         attention = self.attention_layers(stacked_features)
         # 计算注意力权重
 
-
         return attention
 
 
+class ClassificationModel(nn.Module):
+    def __init__(self):
+        super().__init__()
+        # 特征提取层
+        self.feature_net = nn.Sequential(
+            nn.Linear(256, 512),
+            nn.ReLU(),
+            nn.Dropout(0.5),
+            nn.Linear(512, 128)
+        )
+
+        # 分类层（输出logits）
+        self.classifier = nn.Linear(128, 1)
+
+    def forward(self, x):
+        # 输入形状: [B, C, L] = [8, 3, 256]
+        x = x.mean(dim=1)  # 通道维度聚合 [8, 256]
+        x = self.feature_net(x)  # [8, 128]
+        return self.classifier(x)  # 输出logits [8, 3]
+
+class AnModel(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+        self.attention_layers = AttentionFusion()
+
+        self.classificationModel = ClassificationModel()
+
+    def forward(self, x):
+        # 输入形状: [8, 3, 256]
+        print(x.size())
+        x = self.attention_layers(x)
+        return self.classificationModel(x)
 # 测试
+import torch
+import torch.nn as nn
+from torch.utils.data import Dataset, DataLoader
+
+
+class ImageDataset(Dataset):
+    def __init__(self, num_samples=1000):
+        self.num_samples = num_samples
+        self.data = torch.randn(num_samples, 3, 256, 256)  # 图像数据
+        self.labels = torch.randint(0, 2, (num_samples,)).float()  # 二分类标签
+
+    def __len__(self):
+        return self.num_samples
+
+    def __getitem__(self, idx):
+        return self.data[idx], self.labels[idx]
+
+
+def train_model():
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    # 数据加载
+    train_dataset = ImageDataset(800)
+    val_dataset = ImageDataset(200)
+
+    train_loader = DataLoader(train_dataset, batch_size=8, shuffle=True)
+    val_loader = DataLoader(val_dataset, batch_size=8)
+
+    # 模型初始化
+    model = AnModel().to(device)
+    criterion = nn.BCEWithLogitsLoss()  # 二分类损失函数
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
+
+    # 训练循环
+    for epoch in range(10):
+        model.train()
+        running_loss = 0.0
+
+        for inputs, labels in train_loader:
+            inputs = inputs.to(device)
+            labels = labels.to(device).float()
+
+            optimizer.zero_grad()
+            outputs = model(inputs).squeeze().float()
+# 从[B,1] -> [B]
+            print(outputs.shape,labels.shape)
+            loss = criterion(outputs, labels)
+            loss.backward()
+            optimizer.step()
+
+            running_loss += loss.item()
+
+        # 验证
+        model.eval()
+        correct = 0
+        total = 0
+        with torch.no_grad():
+            for inputs, labels in val_loader:
+                inputs = inputs.to(device)
+                labels = labels.to(device)
+                outputs = model(inputs).squeeze()
+                predicted = (torch.sigmoid(outputs) > 0.5).float()
+                total += labels.size(0)
+                correct += (predicted == labels).sum().item()
+
+        print(f"Epoch {epoch + 1}/10 | Loss: {running_loss / len(train_loader):.4f} | "
+              f"Val Acc: {100 * correct / total:.2f}%")
+
+
 if __name__ == "__main__":
-    model = AttentionFusion()
-    input_tensor = torch.randn(8, 3, 256, 256)  # 假设输入为一张3通道的256x256图像
-    output = model(input_tensor)
-    print("融合后的特征维度:", output.shape)
+    # 验证模型维度
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    test_model = AnModel().to(device)
+
+
+    test_input = torch.randn(8, 3, 256, 256).to(device)
+    output = test_model(test_input)
+    print("输出维度:", output.shape)  # 应为[8, 1]
+
+    # 开始训练
+    train_model()
